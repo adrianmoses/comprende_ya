@@ -1,0 +1,26 @@
+@import "tailwindcss";
+
+/* Estilos para H5P */
+.h5p-container {
+  position: relative;
+}
+
+.h5p-iframe-wrapper {
+  position: relative;
+  padding-bottom: 56.25%; /* 16:9 aspect ratio */
+  height: 0;
+  overflow: hidden;
+}
+
+.h5p-iframe-wrapper iframe {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+}
+
+/* Override H5P default styles si es necesario */
+.h5p-interactive-video {
+  max-width: 100%;
+}
