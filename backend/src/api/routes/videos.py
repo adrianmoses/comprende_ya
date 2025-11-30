@@ -150,7 +150,7 @@ async def get_video(video_id: str, db: Session = Depends(get_session)):
     """
 
     repo = VideoRepository(db)
-    video = repo.get_by_id(video_id)
+    video = repo.get_by_youtube_id(video_id)
 
     if not video:
         raise HTTPException(status_code=404, detail="Video encontrado")
@@ -158,7 +158,7 @@ async def get_video(video_id: str, db: Session = Depends(get_session)):
     return {
         "id": video.id,
         "video_id": video.youtube_id,
-        "url": video.url,
+        "url": video.youtube_url,
         "title": video.title,
         "duration": video.duration,
         "transcript": video.transcript,
@@ -192,16 +192,17 @@ async def list_videos(skip: int = 0, limit: int = 20, db: Session = Depends(get_
         "videos": [
             {
                 "id": v.id,
-                "video_id": v.video_id,
+                "video_id": v.youtube_id,
                 "title": v.title,
                 "duration": v.duration,
+                "questions": v.questions,
                 "created_at": v.created_at.isoformat(),
             } for v in videos
         ]
     }
 
 
-@router.get("/videos/{video_id}/segments")
+@router.get("/{video_id}/segments")
 async def get_video_segments(
         video_id: int,
         session: Session = Depends(get_session)

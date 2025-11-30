@@ -1,6 +1,6 @@
 // lib/api.ts
 import axios from 'axios';
-import {FlowStatus, VideoRequest, VideoResponse} from '@/types';
+import {FlowStatus, VideoRequest, VideoResponse, VideosResponse} from '@/types';
 
 const API_BASE_URL = process.env.API_URL || 'http://localhost:8000';
 
@@ -34,3 +34,13 @@ export const checkHealth = async () => {
   const response = await apiClient.get('/health');
   return response.data;
 };
+
+export const fetchVideo = async (videoId: string): Promise<VideoResponse> => {
+    const response = await apiClient.get<VideoResponse>(`/api/videos/${videoId}`);
+    return response.data
+}
+
+export const listVideos = async (): Promise<VideosResponse> => {
+    const response = await apiClient.get<VideosResponse>(`/api/videos/`);
+    return response.data;
+}

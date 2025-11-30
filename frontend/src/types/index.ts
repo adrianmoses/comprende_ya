@@ -10,13 +10,19 @@ export interface TimestampedQuestion extends Question {
     timestamp: number;
 }
 
+
 export interface VideoResponse {
+  id: any;
   video_id: string;
   title: string;
   duration: number;
   transcript: string;
   questions: TimestampedQuestion[];
   h5p_content: any;
+}
+
+export interface VideosResponse {
+    videos: VideoResponse[]
 }
 
 export interface VideoRequest {
