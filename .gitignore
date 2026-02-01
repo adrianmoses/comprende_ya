@@ -1,19 +1,7 @@
-# Python-generated files
-__pycache__/
-*.py[oc]
-build/
+node_modules/
+.output/
 dist/
-wheels/
-*.egg-info
-
-# Virtual environments
-.venv
 .env
-backend/.env
-frontend/.env.local
+.env.local
 .DS_Store
 .idea
-
-node_modules/
-
-.output/
