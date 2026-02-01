@@ -12,19 +12,18 @@ Frontend web application for ComprendeYa, a Spanish language comprehension tool.
 ### 1. Install dependencies
 
 ```bash
-cd frontend
 npm install
 ```
 
 ### 2. Configure environment
 
-Copy `.env.example` to `frontend/.env.local` and configure the API URL:
+Copy `.env.example` to `.env.local` and configure the API URL:
 
 ```bash
-cp .env.example frontend/.env.local
+cp .env.example .env.local
 ```
 
-Edit `frontend/.env.local`:
+Edit `.env.local`:
 
 ```
 VITE_API_URL=http://localhost:8000
@@ -35,7 +34,6 @@ The `VITE_API_URL` should point to your running ComprendeYa API instance.
 ## Development
 
 ```bash
-cd frontend
 npm run dev
 ```
 
@@ -44,7 +42,6 @@ The application will be available at http://localhost:3000
 ## Production Build
 
 ```bash
-cd frontend
 npm run build
 npm run start
 ```
@@ -52,7 +49,7 @@ npm run start
 ## Project Structure
 
 ```
-frontend/
+comprende-ya-web/
 ├── src/
 │   ├── components/     # React components
 │   ├── hooks/          # Custom React hooks

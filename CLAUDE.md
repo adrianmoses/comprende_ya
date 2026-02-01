@@ -11,8 +11,6 @@ ComprendeYa Web is the frontend application for ComprendeYa, a Spanish language 
 ## Development Commands
 
 ```bash
-cd frontend
-
 # Install dependencies
 npm install
 
@@ -28,7 +26,7 @@ npm run start
 
 ## Environment Configuration
 
-Create `frontend/.env.local` with:
+Create `.env.local` with:
 
 ```
 VITE_API_URL=http://localhost:8000
@@ -40,7 +38,7 @@ The `VITE_API_URL` points to the ComprendeYa API backend.
 
 ### File-Based Routing
 
-Routes are defined in `frontend/src/routes/` using TanStack Router:
+Routes are defined in `src/routes/` using TanStack Router:
 
 - `__root.tsx` - Root layout with providers
 - `index.tsx` - Home page (video list)
@@ -50,7 +48,7 @@ Routes are defined in `frontend/src/routes/` using TanStack Router:
 
 ### Components
 
-Located in `frontend/src/components/`:
+Located in `src/components/`:
 
 - `VideoInput.tsx` - YouTube URL input form
 - `YouTubeSearch.tsx` - YouTube video search
@@ -63,7 +61,7 @@ Located in `frontend/src/components/`:
 
 ### API Client
 
-The API client (`frontend/src/lib/api.ts`) uses axios with base URL from `VITE_API_URL`:
+The API client (`src/lib/api.ts`) uses axios with base URL from `VITE_API_URL`:
 
 - `processVideo(url)` - Process a YouTube video synchronously
 - `processVideoAsync(url, force)` - Process video asynchronously
@@ -82,7 +80,7 @@ The API client (`frontend/src/lib/api.ts`) uses axios with base URL from `VITE_A
 
 ### Types
 
-TypeScript types are defined in `frontend/src/types/index.ts`.
+TypeScript types are defined in `src/types/index.ts`.
 
 ## Key Technical Details
 
