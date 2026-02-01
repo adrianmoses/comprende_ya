@@ -1,8 +1,8 @@
 from sqlmodel import Session, select
 from typing import Optional, List
 import json
-from models.database import Video, Question as DBQuestion
-from models.schemas import VideoResponse, TimestampedQuestion
+from models.database import Video, Question as DBQuestion, FraseExercise
+from models.schemas import VideoResponse, TimestampedQuestion, FillInBlankExercise
 
 
 class VideoRepository:
@@ -19,7 +19,6 @@ class VideoRepository:
         duration: int,
         transcript: str,
         questions: List[TimestampedQuestion],
-        h5p_content: dict,
         full_transcript_data: Optional[dict] = None,
     ) -> Video:
         """
@@ -32,7 +31,6 @@ class VideoRepository:
             duration: Duración en segundos
             transcript: Transcripción completa como texto
             questions: Lista de preguntas con timestamps
-            h5p_content: Contenido H5P como diccionario
             full_transcript_data: Datos detallados de transcripción (opcional)
 
         Returns:
@@ -45,7 +43,6 @@ class VideoRepository:
             title=title,
             duration=duration,
             transcript=transcript,
-            h5p_content=h5p_content,
             full_transcript_data=json.dumps(full_transcript_data) if full_transcript_data else None,
         )
 
@@ -104,11 +101,31 @@ class VideoRepository:
             for q in video.questions
         ]
 
+        # Cargar ejercicios de fill-in-the-blank si no están cargados
+        if not video.frase_exercises:
+            statement = select(FraseExercise).where(FraseExercise.video_id == video.id)
+            video.frase_exercises = list(self.session.exec(statement).all())
+
+        # Convertir ejercicios de DB a schema
+        fill_in_blank_exercises = [
+            FillInBlankExercise(
+                id=ex.id,
+                original_text=ex.original_transcript_text,
+                exercise_text=ex.exercise_text,
+                answers=json.loads(ex.answers),
+                hints=json.loads(ex.hints),
+                start_time=ex.start_time,
+                end_time=ex.end_time,
+                difficulty=ex.difficulty,
+            )
+            for ex in video.frase_exercises
+        ] if video.frase_exercises else []
+
         return VideoResponse(
             video_id=video.youtube_id,
             title=video.title,
             duration=video.duration,
             transcript=video.transcript,
             questions=questions,
-            h5p_content=json.loads(video.h5p_content) if video.h5p_content else {},
+            fill_in_blank_exercises=fill_in_blank_exercises if fill_in_blank_exercises else None,
         )

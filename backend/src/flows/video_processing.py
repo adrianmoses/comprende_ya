@@ -1,16 +1,18 @@
+from typing import List
+
 from prefect import flow, task
 import os
 import json
 
 from db import get_session, get_db_session
-from models.database import Question, Video
+from models.database import Question, Video, VideoSegment
 from models.schemas import TimestampedQuestion
-from repositories import VideoRepository
-from services.segments import SegmentService
+from repositories import VideoRepository, ExerciseRepository, SegmentsRepository
 from services.youtube import youtube_service
 from services.questions import question_service
 from services.transcription import transcription_service
-from services.h5p import h5p_service
+from services.frase_exercise_generator import FraseExerciseGeneratorService
+
 
 @task(name="Download YouTube Audio", retries=2)
 def download_audio(video_url: str):
@@ -31,12 +33,6 @@ def generate_timestamped_questions(detailed_transcript: str):
     questions = question_service.generate_timestamped_questions(detailed_transcript)
     return questions
 
-
-@task(name="Crear Interactive H5P Video")
-def create_interactive_video(questions, video_url: str, title: str):
-    """Crear H5P Interactivo Video"""
-    h5p_content = h5p_service.create_interactive_video(questions, video_url, title)
-    return h5p_content
 
 @task(name="Cleanup Temporary Files")
 def cleanup(audio_path: str):
@@ -59,8 +55,7 @@ def save_to_database(video_data: dict, force: bool = False):
             existing.title = video_data['title']
             existing.duration = video_data['duration']
             existing.transcript = video_data['transcript']
-            existing.url = video_data['url']
-            existing.h5p_content = video_data['h5p_content']
+            existing.youtube_url = video_data['url']
             existing.full_transcript_data = json.dumps(video_data.get('full_transcript_data'))
 
             for q in existing.questions:
@@ -71,7 +66,7 @@ def save_to_database(video_data: dict, force: bool = False):
                     video_id=existing.id,
                     timestamp=q_data['timestamp'],
                     question=q_data['question'],
-                    answers=q_data['answers'],
+                    answers=json.dumps(q_data['answers']),
                     correct_answer=q_data['correct_answer'],
                     explanation=q_data.get('explanation')
                 )
@@ -95,22 +90,44 @@ def save_to_database(video_data: dict, force: bool = False):
                 duration=video_data['duration'],
                 transcript=video_data['transcript'],
                 questions=[TimestampedQuestion(**q) for q in video_data['questions']],
-                h5p_content=video_data['h5p_content'],
                 full_transcript_data=video_data.get('full_transcript_data')
             )
 
             print(f"✅ Video guardado en DB con ID: {video.id}")
             return video.id
 
+
 @task(name="Guardar Timestamp Segments", retries=2)
-def save_video_segments(video_id: str):
+def save_video_segments(video_id: int) -> List[VideoSegment]:
     """Guardar video segmentos"""
 
+    segments = []
     with get_db_session() as db:
         video = db.get(Video, video_id)
-        segment_service = SegmentService()
-        segments = segment_service.extract_and_save_segments(video, db)
+        segments_repository = SegmentsRepository(db)
+        segments = segments_repository.extract_and_save_segments(video)
         print(f"Creados {len(segments)} segmentos para el video")
+    return segments
+
+
+@task(name="Generar Exercises", retries=2)
+def generate_exercises_task(video_id: int, difficulty: str):
+    """Genera ejercicios de fill-in-the-blank para un video"""
+    with get_db_session() as db:
+        segments_repository = SegmentsRepository(db)
+        video_segments = segments_repository.get_by_video_id(video_id)
+        generator = FraseExerciseGeneratorService(difficulty)
+        return generator.generate_exercises_from_transcription(video_segments)
+
+
+@task(name="Guardar Frase Ejercicios", retries=2)
+def save_exercises_task(video_id: int, exercises: List[dict]):
+    """Guarda ejercicios de fill-in-the-blank en la base de datos"""
+    with get_db_session() as db:
+        exercise_repo = ExerciseRepository(db)
+        created_exercises = exercise_repo.create_exercises(video_id, exercises)
+        print(f"✅ {len(created_exercises)} ejercicios guardados en DB")
+        return created_exercises
 
 
 @flow(name="Process Video", log_prints=True)
@@ -137,11 +154,7 @@ def process_video_flow(video_url: str, force: bool = False):
     for q in questions:
         print(f'    - {q.timestamp:.1f}s: {q.question[:50]}...')
 
-    # 4. Crear H5P
-    h5p_content = create_interactive_video(questions, video_url, metadata['title'])
-    print(f"✅ H5P Interactive Video creado")
-
-    # 5. Guardar en DB
+    # 4. Guardar en DB
     video_data = {
         "video_id": metadata['video_id'],
         "title": metadata['title'],
@@ -149,7 +162,6 @@ def process_video_flow(video_url: str, force: bool = False):
         "url": video_url,
         "transcript": detailed_transcript.full_text,
         "questions": [q.dict() for q in questions],
-        "h5p_content": h5p_content,
         "full_transcript_data": detailed_transcript.dict()
     }
     db_id = save_to_database(video_data, force)
@@ -157,7 +169,14 @@ def process_video_flow(video_url: str, force: bool = False):
     # Guardar Video Segmentos
     save_video_segments(db_id)
 
-    # 6. Cleanup
+    # Generar ejercicios de fill-in-the-blank
+    exercises = generate_exercises_task(db_id, "medio")
+    print(f"✅ {len(exercises)} ejercicios de fill-in-the-blank generados")
+
+    # Guardar ejercicios en DB
+    save_exercises_task(db_id, exercises)
+
+    # 5. Cleanup
     cleanup(audio_path)
     print(f"🧹 Archivos temporales eliminados")
 
@@ -169,6 +188,6 @@ def process_video_flow(video_url: str, force: bool = False):
         "url": video_url,
         "transcript": detailed_transcript.full_text,
         "questions": [q.dict() for q in questions],
-        "h5p_content": h5p_content
+        "exercise_count": len(exercises)
     }
 

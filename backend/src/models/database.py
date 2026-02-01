@@ -14,13 +14,13 @@ class Video(SQLModel, table=True):
     duration: int  # en segundos
     transcript: str
     full_transcript_data: Optional[str] = None  # JSON string de DetailedTranscript
-    h5p_content: dict = Field(default={}, sa_column=Column(JSON))
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
     # Relación con preguntas
     questions: List["Question"] = Relationship(back_populates="video")
     segments: List["VideoSegment"] = Relationship(back_populates="video")
+    frase_exercises: List["FraseExercise"] = Relationship(back_populates="video")
 
 
 
@@ -55,3 +55,33 @@ class VideoSegment(SQLModel, table=True):
 
     # Relación con Video
     video: Optional["Video"] = Relationship(back_populates="segments")
+
+
+class AnswerProgress(SQLModel, table=True):
+    """Modelo para trackear progreso de respuestas"""
+    __tablename__ = "answer_progress"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    video_id: int = Field(foreign_key="videos.id", index=True)
+    question_id: int = Field(foreign_key="questions.id", index=True)
+    user_answer: int  # Índice de la respuesta seleccionada (0-3)
+    is_correct: bool
+    answered_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class FraseExercise(SQLModel, table=True):
+    __tablename__ = "frase_exercise"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    video_id: int = Field(foreign_key="videos.id", index=True)
+    start_time: float
+    end_time: float
+    original_transcript_text: str
+    exercise_text: str # Con los blanks
+    answers: str  # JSON string
+    hints: str  # JSON string
+    difficulty: str
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+    # Relación con Video
+    video: Optional[Video] = Relationship(back_populates="frase_exercises")

@@ -1,5 +1,5 @@
 from pydantic import BaseModel, HttpUrl
-from typing import Optional, List
+from typing import Optional, List, Dict
 
 class VideoRequest(BaseModel):
     url: HttpUrl
@@ -19,13 +19,26 @@ class TimestampedQuestion(BaseModel):
     correct_answer: int
     explanation: Optional[str] = None
 
+
+class FillInBlankExercise(BaseModel):
+    """Ejercicio de completar espacios en blanco"""
+    id: Optional[int] = None
+    original_text: str
+    exercise_text: str  # Texto con "___" para los blanks
+    answers: Dict[str, str]  # {"blank_0": "palabra_correcta", ...}
+    hints: Dict[str, str]  # {"blank_0": "verbo - subjuntivo", ...}
+    start_time: float
+    end_time: float
+    difficulty: str  # "facil", "medio", "dificil"
+
+
 class VideoResponse(BaseModel):
     video_id: str
     title: str
     duration: int
     transcript: str
     questions: List[TimestampedQuestion] # Ahora con timestamps
-    h5p_content: dict
+    fill_in_blank_exercises: Optional[List[FillInBlankExercise]] = None
 
 
 class TranscriptSegment(BaseModel):

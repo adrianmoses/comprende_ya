@@ -1,0 +1,95 @@
+services:
+  # PostgreSQL Database
+  db:
+    image: postgres:16-alpine
+    container_name: comprende_ya_db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: comprende_ya
+    ports:
+      - "5433:5432"  # Maps to 5433 on host to avoid conflicts with local PostgreSQL
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - comprende_ya_network
+
+  # Backend API
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: comprende_ya_backend
+    environment:
+      # API Keys - these should be set in a .env file
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      YOUTUBE_API_KEY: ${YOUTUBE_API_KEY}
+      # Database connection
+      DATABASE_URL: postgresql://postgres:postgres@db:5432/comprende_ya
+      DATABASE_ECHO: "false"
+      # Prefect API URL (points to prefect server)
+      PREFECT_API_URL: http://prefect:4200/api
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend/temp:/app/temp
+      - ./backend/alembic:/app/alembic
+    depends_on:
+      db:
+        condition: service_healthy
+      prefect:
+        condition: service_started
+    networks:
+      - comprende_ya_network
+    restart: unless-stopped
+
+  # Frontend
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_URL: http://localhost:8000
+    container_name: comprende_ya_frontend
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    networks:
+      - comprende_ya_network
+    restart: unless-stopped
+
+  # Prefect Server (for workflow orchestration and UI)
+  prefect:
+    image: prefecthq/prefect:3-latest
+    container_name: comprende_ya_prefect
+    command: prefect server start --host 0.0.0.0
+    environment:
+      PREFECT_SERVER_API_HOST: 0.0.0.0
+      PREFECT_UI_API_URL: http://localhost:4200/api
+    ports:
+      - "4200:4200"  # Prefect UI
+    volumes:
+      - prefect_data:/root/.prefect
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - comprende_ya_network
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+    driver: local
+  prefect_data:
+    driver: local
+
+networks:
+  comprende_ya_network:
+    driver: bridge

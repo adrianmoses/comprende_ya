@@ -19,7 +19,7 @@ class YouTubeService:
             'postprocessors': [{
                 'key': 'FFmpegExtractAudio',
                 'preferredcodec': 'mp3',
-                'preferredquality': '192',
+                'preferredquality': '64',
             }],
             'outtmpl': f'{settings.TEMP_DIR}/%(id)s.%(ext)s',
             'quiet': True,

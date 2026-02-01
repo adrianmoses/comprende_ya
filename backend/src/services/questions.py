@@ -96,38 +96,113 @@ class QuestionService:
         :return:
         """
 
-        # Crear contexto con timestamps para Claude
+        # Sample segments evenly from different parts of the video for better distribution
+        segments = detailed_transcript.segments
+        total_duration = detailed_transcript.duration
+
+        # Divide video into sections (one per question)
+        section_duration = total_duration / num_questions
+        sampled_segments = []
+
+        for i in range(num_questions):
+            # Define the time range for this section
+            section_start = i * section_duration
+            section_end = (i + 1) * section_duration
+
+            # Find segments that fall within this section
+            section_segments = [
+                seg for seg in segments
+                if section_start <= seg.start < section_end
+            ]
+
+            # Add all segments from this section (to give Claude context)
+            sampled_segments.extend(section_segments)
+
+        # If we didn't get enough segments (edge case), use all segments
+        if len(sampled_segments) < num_questions:
+            sampled_segments = segments
+
+        # Create context with timestamps for Claude
         segments_text = "\n".join([
             f"[{seg.start:.1f}s - {seg.end:.1f}s]: {seg.text}"
-            for seg in detailed_transcript.segments
+            for seg in sampled_segments
         ])
 
         prompt = f"""Basándote en esta transcripción con timestamps, genera {num_questions} preguntas de comprensión.
-        
+
         Duración total del video: {detailed_transcript.duration:.1f} segundos
-        
-        Transcripción con timestamps:
+
+        IMPORTANTE - DISTRIBUCIÓN: El video ha sido dividido en {num_questions} secciones temporales.
+        Debes generar EXACTAMENTE UNA pregunta para CADA sección, distribuyéndolas uniformemente:
+        {chr(10).join([f"- Sección {i+1}: {i * section_duration:.1f}s - {(i+1) * section_duration:.1f}s" for i in range(num_questions)])}
+
+        Transcripción con timestamps (organizada por secciones):
         {segments_text}
-        
-        IMPORTANTE:
-        1. Distribuye las preguntas a lo largo del video (no todas al principio)
-        2. El timestamp debe ser el momento EXACTO donde termina de mencionarse la información
-        3. Si la información se menciona entre 15.0s y 17.5s, usa timestamp: 17.5
-        4. Esto asegura que la pregunta aparezca DESPUÉS de escuchar el contenido completo
-        5. Las preguntas deben ser sobre información específica mencionada en ese momento
-        
+
+        TIPOS DE PREGUNTAS (en orden de prioridad):
+        1. EXPRESIONES COLOQUIALES (40%): Identifica modismos, frases hechas, y expresiones idiomáticas.
+           - Pregunta sobre su significado en contexto
+           - Incluye suficiente contexto para inferir
+           - Ejemplo: "Cuando dice 'se quedó de piedra', ¿qué significa sobre su reacción?"
+
+        2. COMPRENSIÓN DE IDEAS (30%): Testea si entendieron el argumento o punto principal
+           - No solo memoria de palabras específicas
+           - Ejemplo: "¿Por qué el presentador cree que X es importante?"
+
+        3. VOCABULARIO EN CONTEXTO (30%): Palabras menos comunes o técnicas
+           - Testea comprensión del significado, no traducción
+           - Ejemplo: "¿A qué se refiere con 'desfase'?"
+
+        EVITA:
+        - Preguntas sobre números exactos o detalles triviales
+        - Preguntas que requieran memoria fotográfica
+        - Preguntas cuya respuesta sea una sola palabra sin contexto
+
+        TIMING:
+        1. El timestamp debe ser el momento EXACTO donde termina de mencionarse la información
+        2. Si la información se menciona entre 15.0s y 17.5s, usa timestamp: 17.5
+        3. Esto asegura que la pregunta aparezca DESPUÉS de escuchar el contenido completo
+        4. Asegúrate que cada pregunta tenga un timestamp dentro de su sección correspondiente
+
         Responde ÚNICAMENTE con un array JSON (sin markdown):
         [
           {{
             "timestamp": 15.5,
-            "question": "¿Qué acaba de mencionar sobre...?",
+            "question": "¿Qué significa cuando dice...?",
             "answers": ["Opción A", "Opción B", "Opción C", "Opción D"],
             "correct_answer": 0,
-            "explanation": "La respuesta es A porque en este momento del video se menciona..."
+            "explanation": "La respuesta es A porque la expresión 'X' significa...",
+            "question_type": "colloquial" // o "comprehension" o "vocabulario"
           }}
         ]
-
         """
+
+        # prompt = f"""Basándote en esta transcripción con timestamps, genera {num_questions} preguntas de comprensión.
+        #
+        # Duración total del video: {detailed_transcript.duration:.1f} segundos
+        #
+        # Transcripción con timestamps:
+        # {segments_text}
+        #
+        # IMPORTANTE:
+        # 1. Distribuye las preguntas a lo largo del video (no todas al principio)
+        # 2. El timestamp debe ser el momento EXACTO donde termina de mencionarse la información
+        # 3. Si la información se menciona entre 15.0s y 17.5s, usa timestamp: 17.5
+        # 4. Esto asegura que la pregunta aparezca DESPUÉS de escuchar el contenido completo
+        # 5. Las preguntas deben ser sobre información específica mencionada en ese momento
+        #
+        # Responde ÚNICAMENTE con un array JSON (sin markdown):
+        # [
+        #   {{
+        #     "timestamp": 15.5,
+        #     "question": "¿Qué acaba de mencionar sobre...?",
+        #     "answers": ["Opción A", "Opción B", "Opción C", "Opción D"],
+        #     "correct_answer": 0,
+        #     "explanation": "La respuesta es A porque en este momento del video se menciona..."
+        #   }}
+        # ]
+        #
+        # """
 
         message = self.client.messages.create(
             model="claude-4-sonnet-20250514",

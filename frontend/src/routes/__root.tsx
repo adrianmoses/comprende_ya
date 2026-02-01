@@ -11,7 +11,7 @@ import { NotFound } from '@/components/NotFound'
 import type { QueryClient } from '@tanstack/react-query'
 import { ReactQueryDevtools } from '@tanstack/react-query-devtools'
 import { TanStackRouterDevtools } from '@tanstack/react-router-devtools'
-import appCss from '../styles.css?url'
+import appCss from '../styles/global.css?url'
 import {Toaster} from "@/components/ui/sonner";
 
 export const Route = createRootRouteWithContext<{

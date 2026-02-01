@@ -1,6 +1,7 @@
 import { createFileRoute } from '@tanstack/react-router'
-import InteractiveVideoPlayer from "@/components/InteractiveVideoPlayer";
+import VideoWithQuestions from "@/components/VideoWithQuestions";
 import TimestampedQuestionsList from "@/components/TimestampedQuestionsList";
+import FillInBlankExercisesList from "@/components/FillInBlankExercisesList";
 import {useState} from "react";
 import {fetchVideo} from "@/lib/api";
 
@@ -11,7 +12,7 @@ export const Route = createFileRoute('/video/$videoId')({
     component: RouteComponent,
 })
 
-type ViewMode = 'interactive' | 'list' | 'transcript';
+type ViewMode = 'interactive' | 'list' | 'ejercicios' | 'transcript';
 
 function RouteComponent() {
     const [viewMode, setViewMode] = useState<ViewMode>('interactive')
@@ -43,6 +44,16 @@ function RouteComponent() {
                           📝 Lista de Preguntas
                       </button>
                       <button
+                          onClick={() => setViewMode('ejercicios')}
+                          className={`px-4 py-2 font-medium transition-colors ${
+                              viewMode === 'ejercicios'
+                                  ? 'text-blue-600 border-b-2 border-blue-600'
+                                  : 'text-gray-600 hover:text-gray-900'
+                          }`}
+                      >
+                          ✏️ Ejercicios
+                      </button>
+                      <button
                           onClick={() => setViewMode('transcript')}
                           className={`px-4 py-2 font-medium transition-colors ${
                               viewMode === 'transcript'
@@ -58,23 +69,24 @@ function RouteComponent() {
               {/* Content */}
               <div className="mt-6">
                   {viewMode === 'interactive' && (
-                      <div className="space-y-4">
-                          <div className="max-w-4xl mx-auto bg-blue-50 p-4 rounded-lg">
-                              <p className="text-sm text-blue-800">
-                                  💡 <strong>Tip:</strong> El video se pausará automáticamente en los momentos clave para hacerte preguntas.
-                              </p>
-                          </div>
-                          <InteractiveVideoPlayer
-                              videoId={result.video_id}
-                              questions={result.questions}
-                              title={result.title}
-                          />
-                      </div>
+                      <VideoWithQuestions
+                          videoId={result.video_id}
+                          questions={result.questions}
+                          title={result.title}
+                          exercises={result.fill_in_blank_exercises || []}
+                      />
                   )}
                   {viewMode === 'list' && (
 
                       <TimestampedQuestionsList
                           questions={result.questions}
+                          title={result.title}
+                      />
+                  )}
+
+                  {viewMode === 'ejercicios' && (
+                      <FillInBlankExercisesList
+                          exercises={result.fill_in_blank_exercises || []}
                           title={result.title}
                       />
                   )}

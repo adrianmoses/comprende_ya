@@ -1,20 +1,27 @@
 import os
 import re
 import uuid
+import json
 from typing import List
 from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends, Query
 from sqlmodel import Session, select
 
 from db import get_session
-from models.database import Video, VideoSegment
+from models.database import Video, VideoSegment, Question
 from models.schemas import VideoRequest, VideoResponse
 from flows.video_processing import process_video_flow
 from repositories import VideoRepository
-from services.h5p import h5p_service
+from repositories.progress_repository import ProgressRepository
+from repositories.classifier_repository import ClassifierRepository
 from services.questions import question_service
-from services.segments import SegmentService
 from services.transcription import transcription_service
 from services.youtube import youtube_service
+
+from services.youtube_search import youtube_search
+from services.youtube_transcript import youtube_transcript_service
+from services.dialect_classifier import dialect_classifier
+
+from repositories.segments_repository import SegmentsRepository
 
 router = APIRouter()
 
@@ -44,6 +51,51 @@ async def run_flow_background(flow_run_id: str, video_url: str, force: bool = Fa
             "url": video_url,
             "error": str(e)
         }
+
+@router.get("/search")
+async def search_videos(
+        query: str = Query(..., description="Búsqueda de videos de YouTube"),
+        max_results: int = Query(10, ge=1, le=25, description="Número máximo de resultados")
+):
+    """
+    Busca videos de YouTube por query
+    :param query: Término de búsqueda
+    :param max_results: Número máximo de resultados (1-25)
+    :return: Lista de videos con metadata
+    """
+    if not query.strip():
+        raise HTTPException(status_code=400, detail="Query no puede estar vacío")
+
+    results = youtube_search.search_videos(query, max_results)
+    return {"results": results}
+
+
+@router.get("/search/classify/{video_id}")
+async def classify_video_from_search(video_id: str):
+    """
+    Clasifica el dialecto de un video específico usando su transcripción de YouTube
+    :param video_id: ID del video de YouTube
+    :return: Clasificación del dialecto o error si no hay transcripción
+    """
+    # Intentar obtener transcripción (muestra de 3000 caracteres)
+    transcript_sample = youtube_transcript_service.get_transcript_sample(video_id, max_chars=3000)
+
+    if not transcript_sample:
+        raise HTTPException(
+            status_code=404,
+            detail="No se encontró transcripción disponible para este video"
+        )
+
+    # Clasificar dialecto
+    classification = dialect_classifier.classify_from_sample(transcript_sample)
+
+    if not classification:
+        raise HTTPException(
+            status_code=500,
+            detail="Error al clasificar el dialecto del video"
+        )
+
+    return classification
 
 @router.post("/process-async")
 async def process_video_async(
@@ -83,8 +135,16 @@ async def process_video_async(
                     "title": existing_video.title,
                     "duration": existing_video.duration,
                     "transcript": existing_video.transcript,
-                    "questions": [q.model_dump() for q in existing_video.questions],
-                    "h5p_content": existing_video.h5p_content,
+                    "questions": [
+                        {
+                            "id": q.id,
+                            "timestamp": q.timestamp,
+                            "question": q.question,
+                            "answers": json.loads(q.answers),
+                            "correct_answer": q.correct_answer,
+                            "explanation": q.explanation,
+                        } for q in existing_video.questions
+                    ],
                     "created_at": existing_video.created_at.isoformat()
                 }
             }
@@ -162,17 +222,29 @@ async def get_video(video_id: str, db: Session = Depends(get_session)):
         "title": video.title,
         "duration": video.duration,
         "transcript": video.transcript,
-        "h5p_content": video.h5p_content,
         "questions": [
             {
+                "id": q.id,
                 "timestamp": q.timestamp,
                 "question": q.question,
-                "answers": q.answers,
+                "answers": json.loads(q.answers),
                 "correct_answer": q.correct_answer,
                 "explanation": q.explanation,
             } for q in video.questions
         ],
         "created_at": video.created_at.isoformat(),
+        "fill_in_blank_exercises": [
+            {
+                "id": exercise.id,
+                "original_text": exercise.original_transcript_text,
+                "exercise_text": exercise.exercise_text,
+                "answers": json.loads(exercise.answers),
+                "hints": json.loads(exercise.hints),
+                "difficulty": exercise.difficulty,
+                "start_time": exercise.start_time,
+                "end_time": exercise.end_time,
+            } for exercise in video.frase_exercises
+        ]
     }
 
 @router.get("/")
@@ -221,10 +293,10 @@ async def get_video_segments(
         .order_by(VideoSegment.segment_number)
     ).all()
 
-    segment_service = SegmentService()
+    segment_repo = SegmentsRepository()
     # Si no hay segmentos, intentar extraerlos
     if not segments and video.full_transcript_data:
-        segments = segment_service.extract_and_save_segments(video, session)
+        segments = segment_repo.extract_and_save_segments(video, session)
 
     return [
         {
@@ -262,11 +334,7 @@ async def process_video(request: VideoRequest):
         print("Generando preguntas")
         questions = question_service.generate_question(transcript)
 
-        # 4. Crear H5P
-        print("Creando visualizacion")
-        h5p_content = h5p_service.create_quiz(questions, metadata["title"])
-
-        # 5. Limpiar archivo temporal
+        # 4. Limpiar archivo temporal
         print("Limpiando archivo")
         os.remove(audio_path)
 
@@ -278,8 +346,7 @@ async def process_video(request: VideoRequest):
             title=metadata["title"],
             duration=metadata["duration"],
             transcript=transcript,
-            questions=questions,
-            h5p_content=h5p_content
+            questions=questions
         )
     except HTTPException:
         # Re-lanzar HTTPException tal cual
@@ -290,4 +357,146 @@ async def process_video(request: VideoRequest):
         return HTTPException(status_code=500, detail=f"Error procesando video: {str(e)}")
 
 
+# Progress tracking endpoints
+
+@router.post("/{video_id}/progress")
+async def save_progress(
+    video_id: str,
+    question_id: int,
+    user_answer: int,
+    db: Session = Depends(get_session)
+):
+    """
+    Guarda el progreso de una respuesta.
+
+    Args:
+        video_id: YouTube ID del video
+        question_id: ID de la pregunta
+        user_answer: Índice de la respuesta seleccionada (0-3)
+    """
+    # Obtener el video por YouTube ID
+    video_repo = VideoRepository(db)
+    video = video_repo.get_by_youtube_id(video_id)
+
+    if not video:
+        raise HTTPException(status_code=404, detail="Video no encontrado")
+
+    # Obtener la pregunta para verificar la respuesta
+    question = db.get(Question, question_id)
+    if not question:
+        raise HTTPException(status_code=404, detail="Pregunta no encontrada")
+
+    if question.video_id != video.id:
+        raise HTTPException(status_code=400, detail="La pregunta no pertenece a este video")
+
+    # Verificar si la respuesta es correcta
+    is_correct = user_answer == question.correct_answer
+
+    # Guardar progreso
+    progress_repo = ProgressRepository(db)
+    progress = progress_repo.save_answer(
+        video_id=video.id,
+        question_id=question_id,
+        user_answer=user_answer,
+        is_correct=is_correct
+    )
+
+    return {
+        "question_id": question_id,
+        "user_answer": user_answer,
+        "is_correct": is_correct,
+        "answered_at": progress.answered_at.isoformat()
+    }
+
+
+@router.get("/{video_id}/progress")
+async def get_progress(
+    video_id: str,
+    db: Session = Depends(get_session)
+):
+    """
+    Obtiene el progreso de todas las preguntas de un video.
+
+    Args:
+        video_id: YouTube ID del video
+    """
+    # Obtener el video por YouTube ID
+    video_repo = VideoRepository(db)
+    video = video_repo.get_by_youtube_id(video_id)
+
+    if not video:
+        raise HTTPException(status_code=404, detail="Video no encontrado")
+
+    # Obtener progreso
+    progress_repo = ProgressRepository(db)
+    progress_records = progress_repo.get_video_progress(video.id)
+    summary = progress_repo.get_progress_summary(video.id)
+
+    # Formatear respuesta
+    progress_data = [
+        {
+            "question_id": p.question_id,
+            "user_answer": p.user_answer,
+            "is_correct": p.is_correct,
+            "answered_at": p.answered_at.isoformat()
+        }
+        for p in progress_records
+    ]
+
+    return {
+        "video_id": video_id,
+        "summary": summary,
+        "progress": progress_data
+    }
+
+
+@router.delete("/{video_id}/progress")
+async def reset_progress(
+    video_id: str,
+    db: Session = Depends(get_session)
+):
+    """
+    Resetea todo el progreso de un video.
+
+    Args:
+        video_id: YouTube ID del video
+    """
+    # Obtener el video por YouTube ID
+    video_repo = VideoRepository(db)
+    video = video_repo.get_by_youtube_id(video_id)
+
+    if not video:
+        raise HTTPException(status_code=404, detail="Video no encontrado")
+
+    # Resetear progreso
+    progress_repo = ProgressRepository(db)
+    deleted_count = progress_repo.reset_video_progress(video.id)
+
+    return {
+        "video_id": video_id,
+        "deleted_count": deleted_count,
+        "message": "Progreso reseteado exitosamente"
+    }
+
+
+@router.get("/{video_id}/classify")
+async def classify(
+    video_id: str,
+    db: Session = Depends(get_session)
+):
+    # Obtener el video por YouTube ID
+    video_repo = VideoRepository(db)
+    video = video_repo.get_by_youtube_id(video_id)
+
+    if not video:
+        raise HTTPException(status_code=404, detail="Video no encontrado")
+
+
+    classifier_repo = ClassifierRepository(db)
+    classified = classifier_repo.classify_video(video)
+
+    return {
+        "video_id": video_id,
+        "classified": classified
+    }
 
